@@ -1,0 +1,494 @@
+---
+title: "ST Analysis: Doctorates"
+output: html_document
+---
+
+```{r setup, message=FALSE, warning=FALSE, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readxl)
+library(knitr)
+library(kableExtra)
+library(tidyverse)
+```
+
+
+<!-- Nav tabs -->
+<ul class="nav nav-tabs" id="myTab" role="tablist">
+  <li class="nav-item">
+    <a class="nav-link active" id="stats-tab" data-toggle="tab" href="#stats" role="tab" aria-controls="stats" aria-selected="false">Descriptive statistics</a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link" id="anal-sum-tab" data-toggle="tab" href="#anal-sum" role="tab" aria-controls="anal-sum" aria-selected="false">Analysis Summary</a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link" id="gpa-tab" data-toggle="tab" href="#gpa" role="tab" aria-controls="gpa" aria-selected="false">GPA: Linear Regression</a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link" id="sep-tab" data-toggle="tab" href="#sep" role="tab" aria-controls="sep" aria-selected="false">Separation: Logistic Regression</a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link" id="ttd-tab" data-toggle="tab" href="#ttd" role="tab" aria-controls="ttd" aria-selected="false">Time-to-Degree: Survival Analysis</a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link" id="urm-tab" data-toggle="tab" href="#urm" role="tab" aria-controls="urm" aria-selected="false">URM: Logistic Regression</a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link" id="gender-tab" data-toggle="tab" href="#gender" role="tab" aria-controls="gender" aria-selected="false">Gender: Logistic Regression</a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link" id="prev-tab" data-toggle="tab" href="#prev" role="tab" aria-controls="prev" aria-selected="false">Previous Degree: Logistic Regression</a>
+  </li>
+  
+</ul>
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+
+doc_dat5 <- read.xlsx("doc_dat5.xlsx")
+doc_dat5_stem <- filter(doc_dat5, STEM == 1)
+doc_dat5_non_stem <- filter(doc_dat5, STEM == 0)
+
+doc_dat6 <- read.xlsx("doc_dat6.xlsx")
+doc_dat6_stem <- filter(doc_dat6, STEM == 1)
+doc_dat6_non_stem <- filter(doc_dat6, STEM == 0)
+
+```
+
+<!-- Tab panes -->
+<div class="tab-content" id="myTabContent">
+  <div class="tab-pane fade" id="stats" role="tabpanel" aria-labelledby="stats-tab">
+
+# {.tabset}
+
+## All Doctorates
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+
+doc_summary <- read.xlsx("Doc_Complete Summaries.xlsx", sheet = 'stats')
+kable(doc_summary, format = "html", caption = "") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE, border_right = TRUE) %>%
+  column_spec(2, width = "3cm")
+
+```
+
+
+## STEM
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+
+doc_stem_summary <- read.xlsx("Doc_Complete Summaries.xlsx", sheet = 'stats_s')
+kable(doc_stem_summary, format = "html", caption = "") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE, border_right = TRUE) %>%
+  column_spec(2, width = "3cm")
+
+```
+
+
+## Non-STEM
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+
+doc_non_stem_summary <- read.xlsx("Doc_Complete Summaries.xlsx", sheet = 'stats_n')
+kable(doc_non_stem_summary, format = "html", caption = "") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE, border_right = TRUE) %>%
+  column_spec(2, width = "3cm")
+
+```
+
+  </div>
+
+
+  <div class="tab-pane fade" id="anal-sum" role="tabpanel" aria-labelledby="anal-sum-tab">
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+
+doc_anal_sum <- read.xlsx("Doc_Complete Summaries.xlsx", sheet = 'summary')
+kable(doc_anal_sum, format = "html", caption = "Coefficient for linear regression, 
+                          marginal effect for logistic regression, 
+                          hazard ratio for survival analysis
+                          (p-value in parentheses)") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE, border_right = TRUE) %>%
+  column_spec(2, width = "3cm")
+
+```
+
+  </div>
+
+
+  <div class="tab-pane fade" id="gpa" role="tabpanel" aria-labelledby="gpa-tab">
+
+
+# {.tabset}
+
+## Year 1
+
+### All Doctorates
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+
+doc_gpa1_model_summary_df <- read.xlsx("Doc_Complete Summaries.xlsx", sheet = 'gpa1')
+kable(doc_gpa1_model_summary_df, format = "html", caption = "") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE, border_right = TRUE) %>%
+  column_spec(2, width = "3cm")
+
+```
+
+
+### STEM
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+
+doc_stem_gpa1_model_summary_df <- read.xlsx("Doc_Complete Summaries.xlsx", sheet = 'gpa1_s')
+kable(doc_stem_gpa1_model_summary_df, format = "html", caption = "") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE, border_right = TRUE) %>%
+  column_spec(2, width = "3cm")
+
+```
+
+### Non-STEM
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+
+doc_non_stem_gpa1_model_summary_df <- read.xlsx("Doc_Complete Summaries.xlsx", sheet = 'gpa1_n')
+kable(doc_non_stem_gpa1_model_summary_df, format = "html", caption = "") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE, border_right = TRUE) %>%
+  column_spec(2, width = "3cm")
+
+```
+
+## Year 2
+
+### All Doctorates
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+
+doc_gpa2_model_summary_df <- read.xlsx("Doc_Complete Summaries.xlsx", sheet = 'gpa2')
+kable(doc_gpa2_model_summary_df, format = "html", caption = "") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE, border_right = TRUE) %>%
+  column_spec(2, width = "3cm")
+
+```
+
+
+### STEM
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+
+doc_stem_gpa2_model_summary_df <- read.xlsx("Doc_Complete Summaries.xlsx", sheet = 'gpa2_s')
+kable(doc_stem_gpa2_model_summary_df, format = "html", caption = "") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE, border_right = TRUE) %>%
+  column_spec(2, width = "3cm")
+
+```
+
+### Non-STEM
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+
+doc_non_stem_gpa2_model_summary_df <- read.xlsx("Doc_Complete Summaries.xlsx", sheet = 'gpa2_n')
+kable(doc_non_stem_gpa2_model_summary_df, format = "html", caption = "") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE, border_right = TRUE) %>%
+  column_spec(2, width = "3cm")
+
+```
+
+  </div>
+
+  <div class="tab-pane fade" id="sep" role="tabpanel" aria-labelledby="sep-tab">
+
+
+# {.tabset}
+
+## Year 1
+
+### All Doctorates
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+
+doc_sep1_model_summary_df <- read.xlsx("Doc_Complete Summaries.xlsx", sheet = 'sep1')
+kable(doc_sep1_model_summary_df, format = "html", caption = "") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE, border_right = TRUE) %>%
+  column_spec(2, width = "3cm")
+
+```
+
+
+### STEM
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+
+doc_stem_sep1_model_summary_df <- read.xlsx("Doc_Complete Summaries.xlsx", sheet = 'sep1_s')
+kable(doc_stem_sep1_model_summary_df, format = "html", caption = "") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE, border_right = TRUE) %>%
+  column_spec(2, width = "3cm")
+
+```
+
+### Non-STEM
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+
+doc_non_stem_sep1_model_summary_df <- read.xlsx("Doc_Complete Summaries.xlsx", sheet = 'sep1_n')
+kable(doc_non_stem_sep1_model_summary_df, format = "html", caption = "") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE, border_right = TRUE) %>%
+  column_spec(2, width = "3cm")
+
+```
+
+## Year 2
+
+### All Doctorates
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+
+doc_sep2_model_summary_df <- read.xlsx("Doc_Complete Summaries.xlsx", sheet = 'sep2')
+kable(doc_sep2_model_summary_df, format = "html", caption = "") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE, border_right = TRUE) %>%
+  column_spec(2, width = "3cm")
+
+```
+
+
+### STEM
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+
+doc_stem_sep2_model_summary_df <- read.xlsx("Doc_Complete Summaries.xlsx", sheet = 'sep2_s')
+kable(doc_stem_sep2_model_summary_df, format = "html", caption = "") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE, border_right = TRUE) %>%
+  column_spec(2, width = "3cm")
+
+```
+
+### Non-STEM
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+
+doc_non_stem_sep2_model_summary_df <- read.xlsx("Doc_Complete Summaries.xlsx", sheet = 'sep2_n')
+kable(doc_non_stem_sep2_model_summary_df, format = "html", caption = "") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE, border_right = TRUE) %>%
+  column_spec(2, width = "3cm")
+
+```
+  
+  </div>
+  
+  <div class="tab-pane fade" id="ttd" role="tabpanel" aria-labelledby="ttd-tab">
+
+# {.tabset}
+  
+## All Doctorates
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+
+doc_ttd_model_summary_df <- read.xlsx("Doc_Complete Summaries.xlsx", sheet = 'ttd')
+kable(doc_ttd_model_summary_df, format = "html", caption = "") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE, border_right = TRUE) %>%
+  column_spec(2, width = "3cm")
+
+```
+
+
+## STEM
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+
+doc_stem_ttd_model_summary_df <- read.xlsx("Doc_Complete Summaries.xlsx", sheet = 'ttd_s')
+kable(doc_stem_ttd_model_summary_df, format = "html", caption = "") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE, border_right = TRUE) %>%
+  column_spec(2, width = "3cm")
+
+```
+
+## Non-STEM
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+
+doc_non_stem_ttd_model_summary_df <- read.xlsx("Doc_Complete Summaries.xlsx", sheet = 'ttd_n')
+kable(doc_non_stem_ttd_model_summary_df, format = "html", caption = "") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE, border_right = TRUE) %>%
+  column_spec(2, width = "3cm")
+
+```
+
+  </div>
+  
+  <div class="tab-pane fade" id="urm" role="tabpanel" aria-labelledby="urm-tab">
+
+# {.tabset}
+  
+## All Doctorates
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+
+doc_urm_model_summary_df <- read.xlsx("Doc_Complete Summaries.xlsx", sheet = 'urm')
+kable(doc_urm_model_summary_df, format = "html", caption = "") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE, border_right = TRUE) %>%
+  column_spec(2, width = "3cm")
+
+```
+
+
+## STEM
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+
+doc_stem_urm_model_summary_df <- read.xlsx("Doc_Complete Summaries.xlsx", sheet = 'urm_s')
+kable(doc_stem_urm_model_summary_df, format = "html", caption = "") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE, border_right = TRUE) %>%
+  column_spec(2, width = "3cm")
+
+```
+
+## Non-STEM
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+
+doc_non_stem_urm_model_summary_df <- read.xlsx("Doc_Complete Summaries.xlsx", sheet = 'urm_n')
+kable(doc_non_stem_urm_model_summary_df, format = "html", caption = "") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE, border_right = TRUE) %>%
+  column_spec(2, width = "3cm")
+
+```
+
+  </div>
+  
+  <div class="tab-pane fade" id="gender" role="tabpanel" aria-labelledby="gender-tab">
+
+# {.tabset}
+  
+## All Doctorates
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+
+doc_gender_model_summary_df <- read.xlsx("Doc_Complete Summaries.xlsx", sheet = 'gender')
+kable(doc_gender_model_summary_df, format = "html", caption = "") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE, border_right = TRUE) %>%
+  column_spec(2, width = "3cm")
+
+```
+
+
+## STEM
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+
+doc_stem_gender_model_summary_df <- read.xlsx("Doc_Complete Summaries.xlsx", sheet = 'gender_s')
+kable(doc_stem_gender_model_summary_df, format = "html", caption = "") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE, border_right = TRUE) %>%
+  column_spec(2, width = "3cm")
+
+```
+
+## Non-STEM
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+
+doc_non_stem_gender_model_summary_df <- read.xlsx("Doc_Complete Summaries.xlsx", sheet = 'gender_n')
+kable(doc_non_stem_gender_model_summary_df, format = "html", caption = "") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE, border_right = TRUE) %>%
+  column_spec(2, width = "3cm")
+
+```
+  
+  </div>
+  
+  <div class="tab-pane fade" id="prev" role="tabpanel" aria-labelledby="prev-tab">
+
+# {.tabset}
+  
+## All Doctorates
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+
+doc_prev_model_summary_df <- read.xlsx("Doc_Complete Summaries.xlsx", sheet = 'prev')
+kable(doc_prev_model_summary_df, format = "html", caption = "") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE, border_right = TRUE) %>%
+  column_spec(2, width = "3cm")
+
+```
+
+
+## STEM
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+
+doc_stem_prev_model_summary_df <- read.xlsx("Doc_Complete Summaries.xlsx", sheet = 'prev_s')
+kable(doc_stem_prev_model_summary_df, format = "html", caption = "") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE, border_right = TRUE) %>%
+  column_spec(2, width = "3cm")
+
+```
+
+## Non-STEM
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+
+doc_non_stem_prev_model_summary_df <- read.xlsx("Doc_Complete Summaries.xlsx", sheet = 'prev_n')
+kable(doc_non_stem_prev_model_summary_df, format = "html", caption = "") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE, border_right = TRUE) %>%
+  column_spec(2, width = "3cm")
+
+```
+
+  </div>
+</div>
+
+
+
+

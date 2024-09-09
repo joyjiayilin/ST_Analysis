@@ -1,0 +1,295 @@
+---
+title: "ST Analysis: Masters"
+output: html_document
+---
+
+```{r setup, message=FALSE, warning=FALSE, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# List of required packages
+packages <- c("tidyverse", "readxl", "openxlsx", "survival", 
+              "cmprsk", "writexl", "MASS", "bife", "plm", 
+              "margins", "tibble")
+
+# Install packages that are not already installed
+install_if_missing <- function(p) {
+  if (!require(p, character.only = TRUE)) {
+    install.packages(p, dependencies = TRUE)
+  }
+}
+
+# Install and load all packages
+lapply(packages, install_if_missing)
+
+# Load all packages
+lapply(packages, library, character.only = TRUE)
+
+```
+
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+
+clean_dept_column <- function(df) {
+  df$Dept <- gsub('xml:space=\\"preserve\\">', '', df$Dept)
+  df$Dept <- gsub('&amp; ', '', df$Dept)
+  df$Dept <- trimws(df$Dept)  # Remove leading/trailing whitespace
+  return(df)
+}
+mas_dat4 <- read.xlsx("mas_dat4.xlsx") %>% clean_dept_column()
+
+```
+
+
+# mas_dat5
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+
+# First & second GPA: 2nd & 3rd-year Fall
+
+mas_dat5 <- mas_dat4 %>%
+        group_by(UID) %>%
+        filter(as.integer(substr(ENR_TERM, 4, 5)) == as.integer(head(sort(unique(substr(ENR_TERM, 4, 5))), 1)) | as.integer(head(sort(unique(substr(ENR_TERM, 4, 5))), 1)) + 1 | as.integer(substr(ENR_TERM, 4, 5)) == as.integer(head(sort(unique(substr(ENR_TERM, 4, 5))), 1)) + 2) %>%
+        filter(substr(ENR_TERM, 1, 1) == 'F')
+
+year_1 <- mas_dat5 %>%
+  group_by(UID) %>%
+  slice(2) %>%
+  rename(ENR_year_1 = ENR_TERM,
+         year_1_gpa = GPA) %>%
+  .[, c("UID", "ADMIT_TERM", "Dept", "Dept_code", "ENR_year_1", "year_1_gpa", "st_required", "separated_1", "separated_2", "prev_deg", "STEM")]
+
+year_2 <- mas_dat5 %>%
+  group_by(UID) %>%
+  slice(3) %>%
+  rename(ENR_year_2 = ENR_TERM,
+         year_2_gpa = GPA) %>%
+  .[, c("UID", "Dept_code", "ENR_year_2", "year_2_gpa", "STEM")]
+
+mas_dat5 <- year_1 %>%
+  left_join(year_2, by = c("UID", "Dept_code")) %>%
+  .[, c(names(.)[names(.) != "STEM.y"])] %>%
+  rename(STEM = STEM.x)
+
+write.xlsx(mas_dat5, "mas_dat5.xlsx", rowNames = FALSE)
+
+```
+
+
+
+# No records
+
+```{r}
+
+# Define a function to calculate UID count and percentage for each event type
+calculate_uid_stats <- function(data, event_types, uid_count) {
+  stats <- sapply(event_types, function(event_type) {
+    event_data <- data %>% filter(event == event_type)
+    uid_cnt <- length(unique(event_data$UID))
+    uid_perc <- (uid_cnt / uid_count) * 100
+    return(paste0(uid_cnt, ' (', round(uid_perc, 2), '%)'))
+  })
+  return(stats)
+}
+
+# Define a function to summarize missing records
+summarize_missing_records <- function(data, year_data, max_terms, event_types, year_label) {
+  # Filter out UIDs not in the year_data and arrange by UID
+  no_record <- data %>%
+    filter(!UID %in% year_data$UID) %>%
+    arrange(UID)
+  no_record_uid_cnt <- length(unique(no_record$UID))
+  
+  # Summarize the count of occurrences for each UID
+  no_record_summary <- no_record %>%
+    group_by(UID) %>%
+    summarise(c = n())
+  
+  # Split UIDs based on their occurrence count
+  uids_within_terms <- no_record_summary %>%
+    filter(c <= max_terms) %>%
+    pull(UID)
+  uids_more_than_terms <- no_record_summary %>%
+    filter(c > max_terms) %>%
+    pull(UID)
+  
+  # No records within specified terms
+  no_record_within_terms <- data %>%
+    filter(UID %in% uids_within_terms) %>%
+    arrange(UID)
+  
+  # Calculate statistics for each event type
+  event_stats <- calculate_uid_stats(no_record_within_terms, event_types, no_record_uid_cnt)
+  
+  # No records with more than specified terms
+  no_record_more_than_terms <- data %>%
+    filter(UID %in% uids_more_than_terms) %>%
+    arrange(UID)
+  fall_uid_cnt <- length(unique(no_record_more_than_terms$UID))
+  fall_uid_perc <- (fall_uid_cnt / no_record_uid_cnt) * 100
+  fall_entry <- paste0(fall_uid_cnt, ' (', round(fall_uid_perc, 2), '%)')
+  
+  # Create a summary table with events as columns
+  summary_table <- tibble(
+    Category = c('Total missing', 
+               paste0('LOA (Never Came Back) within ', year_label), 
+               paste0('Dropout within ', year_label), 
+               paste0('Master Out within ', year_label), 
+               paste0('Graduated within ', year_label), 
+               'Missing Fall data'),
+    Value = c(no_record_uid_cnt,
+              event_stats['1'],
+              event_stats['2'],
+              event_stats['3'],
+              event_stats['4'],
+              fall_entry)
+  )
+  
+  return(summary_table)
+}
+
+# Define event types
+event_types <- c('1', '2', '3', '4')
+
+# Summarize All Records Year 1
+mas_miss1_all <- summarize_missing_records(mas_dat4, year_1, 3, event_types, '1st year')
+
+# Summarize All Records Year 2
+mas_miss2_all <- summarize_missing_records(mas_dat4, year_2, 6, event_types, '1st 2 years')
+
+# Summarize STEM Records Year 1
+mas_stem_miss1 <- summarize_missing_records(filter(mas_dat4, STEM == 1), year_1, 3, event_types, '1st year')
+
+# Summarize STEM Records Year 2
+mas_stem_miss2 <- summarize_missing_records(filter(mas_dat4, STEM == 1), year_2, 6, event_types, '1st 2 years')
+
+# Summarize Non-STEM Records Year 1
+mas_non_stem_miss1 <- summarize_missing_records(filter(mas_dat4, STEM == 0), year_1, 3, event_types, '1st year')
+
+# Summarize Non-STEM Records Year 2
+mas_non_stem_miss2 <- summarize_missing_records(filter(mas_dat4, STEM == 0), year_2, 6, event_types, '1st 2 years')
+
+# Export
+wb <- createWorkbook()
+
+addWorksheet(wb, "miss1")
+addWorksheet(wb, "miss2")
+addWorksheet(wb, "miss1_s")
+addWorksheet(wb, "miss2_s")
+addWorksheet(wb, "miss1_n")
+addWorksheet(wb, "miss2_n")
+writeData(wb, sheet = "miss1", x = mas_miss1_all)
+writeData(wb, sheet = "miss2", x = mas_miss2_all)
+writeData(wb, sheet = "miss1_s", x = mas_stem_miss1)
+writeData(wb, sheet = "miss2_s", x = mas_stem_miss2)
+writeData(wb, sheet = "miss1_n", x = mas_non_stem_miss1)
+writeData(wb, sheet = "miss2_n", x = mas_non_stem_miss2)
+
+# Save the workbook to a file
+saveWorkbook(wb, file = paste0(dirname(getwd()), "/Shiny/Mas_Reasons for Missing Data.xlsx"), overwrite = TRUE)
+
+```
+
+
+# Count
+
+```{r}
+
+year_2 %>%
+  filter(STEM == 1) %>%
+  #filter(!is.na(year_2_gpa)) %>%
+  group_by(UID) %>%
+  summarise(c = n()) %>%
+  arrange(c)
+
+```
+
+
+# mas_dat6
+
+## If missing data ever since i-th year, then sep = 1
+
+```{r}
+
+for (i in 1:10) {
+  
+  mas_dat4_F <- mas_dat4 %>%
+    group_by(UID) %>%
+    filter(substr(ENR_TERM, 1, 1) == 'F')
+  
+  year_i <- mas_dat4_F %>%
+    group_by(UID) %>%
+    slice(2)
+  
+  # Filter to get missing UIDs for this iteration
+  mas_dat4_missing_i <- filter(mas_dat4, !(UID %in% year_i$UID))
+  
+  # Get UIDs with <=3i and >3i terms for this iteration
+  mas_dat4_missing_i_no_more_than_3i_terms <- mas_dat4_missing_i %>%
+    group_by(UID) %>%
+    summarise(c = n()) %>%
+    filter(c <= 3 * i)
+  
+  mas_dat4_missing_i_more_than_3i_terms <- mas_dat4_missing_i %>%
+    group_by(UID) %>%
+    summarise(c = n()) %>%
+    filter(c > 3 * i)
+  
+  # Update the separated_i column based on the conditions
+  mas_dat4 <- mas_dat4 %>%
+    mutate(!!paste0('separated_', i) := case_when(
+      UID %in% mas_dat4_missing_i_no_more_than_3i_terms$UID ~ 1,
+      UID %in% mas_dat4_missing_i_more_than_3i_terms$UID & nth(LOA, 3 * i) == 1 ~ 1,
+      UID %in% mas_dat4_missing_i_more_than_3i_terms$UID & nth(LOA, 3 * i) == 0 ~ 0,
+      TRUE ~ !!sym(paste0('separated_', i))
+    ))
+  
+  # Un-group the data after the transformations
+  mas_dat4 <- ungroup(mas_dat4)
+}
+
+```
+
+
+
+## mas_dat6
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+
+
+# Replace Access w/ specific majors
+
+
+# access_uid <- mas_dat4$UID[mas_dat4$Dept_code == '0001']
+# access_declare_major <- mas_dat4[mas_dat4$UID %in% access_uid & mas_dat4$Dept_code != '0001', ]
+# access_not_declare_major <- mas_dat4[!(mas_dat4$UID %in% access_declare_major$UID) & mas_dat4$Dept_code == '0001', ]
+# 
+# mas_dat4$Dept[mas_dat4$UID %in% access_declare_major$UID] <- 
+#   access_declare_major$Dept[match(mas_dat4$UID[mas_dat4$UID %in% access_declare_major$UID], access_declare_major$UID)]
+# mas_dat4$Dept_code[mas_dat4$UID %in% access_declare_major$UID] <- 
+#   access_declare_major$Dept_code[match(mas_dat4$UID[mas_dat4$UID %in% access_declare_major$UID], access_declare_major$UID)]
+
+
+grouping_vars <- c("UID", "ADMIT_TERM", "Dept_code", "Dept", "st_required", "prev_deg", "event", 
+                   "TIME_DEG", "URM", "Non_Male", "completed_8", "completed_10", "STEM", 
+                   paste0("separated_", 1:10))
+
+mas_dat6 <- mas_dat4 %>%
+  group_by(across(all_of(grouping_vars))) %>%
+  summarise(count = n(), .groups = 'keep')
+
+mas_dat6 <- mas_dat6[, !(names(mas_dat6) %in% "count")]
+
+write.xlsx(mas_dat6, "mas_dat6.xlsx", rowNames = FALSE)
+
+```
+
+
+
+
+
+
+
+
+
+
