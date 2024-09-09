@@ -1,0 +1,770 @@
+---
+title: "ST Analysis: Masters"
+output: html_document
+---
+  
+```{r setup, message=FALSE, warning=FALSE, include=FALSE}
+
+# List of required packages
+required_packages <- c(
+  "tidyverse", "readxl", "openxlsx", "survival", "cmprsk", 
+  "writexl", "MASS", "bife", "plm", "margins", "broom"
+)
+
+# Function to check and install missing packages
+install_if_missing <- function(pkg) {
+  if (!require(pkg, character.only = TRUE)) {
+    install.packages(pkg, dependencies = TRUE)
+    library(pkg, character.only = TRUE)
+  }
+}
+
+# Apply the function to all required packages
+invisible(lapply(required_packages, install_if_missing))
+
+
+# Function to extract academic year and term
+extract_year_and_term <- function(data) {
+  data <- data %>%
+    mutate(Year = substr(ADMIT_TERM, 2, 5),
+           Term = substr(ADMIT_TERM, 1, 1))
+  
+  # Convert to factors for use in the model
+  data$Year <- as.factor(data$Year)
+  data$Term <- as.factor(data$Term)
+  
+  return(data)
+}
+
+
+format_sig_figs <- function(value) {
+    if (is.na(value) || value == 0) {
+      return(as.character(value))
+    }
+    
+    # Format with significant figures
+    formatted_value <- formatC(value, digits = 4, format = "fg")
+    
+    # Remove trailing zeros after decimal point
+    formatted_value <- sub("\\.0+$", "", formatted_value)
+    formatted_value
+  }
+
+
+# Fit Linear Model (LM)
+fit_lm_model <- function(data, outcome_variable, filter_stem = NULL) {
+  # Extract academic year and term
+  data <- extract_year_and_term(data)
+  
+  # Drop rows with missing outcome variable
+  data <- data %>% drop_na(!!sym(outcome_variable))
+  
+  # Filter data if filter_stem is provided
+  if (!is.null(filter_stem)) {
+    data <- data %>% filter(STEM == filter_stem)
+  }
+  
+  # Convert to factors if not already
+  data$Term <- as.factor(data$Term)
+  data$Year <- as.factor(data$Year)
+  data$Dept <- as.factor(data$Dept)
+  
+  # Create dummy variables
+  term_dummies <- model.matrix(~ Term - 1, data = data)
+  year_dummies <- model.matrix(~ Year - 1, data = data)
+  dept_dummies <- model.matrix(~ Dept - 1, data = data)
+  
+  # Bind the dummy variables with the original data
+  data <- cbind(data, term_dummies, year_dummies, dept_dummies) %>%
+    dplyr::select(-c(Term, Year, Dept))
+  
+  # Verify the column names of the dummy variables
+  term_columns <- colnames(data)[grep("^Term", colnames(data))]
+  year_columns <- colnames(data)[grep("^Year", colnames(data))]
+  dept_columns <- colnames(data)[grep("^Dept", colnames(data))]
+  dept_columns <- dept_columns[(dept_columns != "Dept_code") &
+                               (dept_columns != "Dept")]
+  dept_columns <- sapply(dept_columns, function(x) if (grepl("[^A-Za-z0-9_]", x)) paste0("`", x, "`") else x)
+
+  # Construct the formula with all dummy variables explicitly
+  formula <- as.formula(paste(outcome_variable, "~ st_required + prev_deg +", 
+                              paste(c(term_columns, year_columns, dept_columns), collapse = " + ")))
+  
+  # Fit the linear model
+  model <- lm(formula, data = data)
+
+  # Get the summary of the model
+  summary_model <- tidy(model)
+  
+  colnames(summary_model) <- c("Term", "Estimate", "SE", "z", "p")
+  
+  # Add sample size to the summary
+  sample_size <- nobs(model)
+  new_row <- tibble(
+    Term = "Sample Size",
+    Estimate = sample_size
+  ) %>%
+    add_column(!!!setNames(rep(NA, ncol(summary_model) - 2), 
+                           colnames(summary_model)[-(1:2)]))
+  summary_model <- bind_rows(new_row, summary_model)
+  
+  summary_model$Term <- gsub("`", "", summary_model$Term)
+  
+  # Extract estimates for 'st_required'
+  coef_estimate <- format_sig_figs(coef(model)['st_required'])
+  p_value <- format_sig_figs(coef(summary(model))['st_required', 'Pr(>|t|)'])
+  entry <- paste0(coef_estimate, ' (', p_value, ')')
+  
+  list(entry = entry, summary_model = summary_model)
+}
+
+
+
+# Fit Generalized Linear Model (GLM)
+fit_glm_model <- function(data, outcome_variable, filter_stem = NULL) {
+  # Extract academic year and term
+  data <- extract_year_and_term(data)
+  
+  # Drop rows with missing outcome variable
+  data <- data %>% drop_na(!!sym(outcome_variable))
+  
+  # Filter data if filter_stem is provided
+  if (!is.null(filter_stem)) {
+    data <- data %>% filter(STEM == filter_stem)
+  }
+  
+  # Convert to factors
+  data$Term <- as.factor(data$Term)
+  data$Year <- as.factor(data$Year)
+  data$Dept <- as.factor(data$Dept)
+  
+  # Manually set reference level to avoid multicolinearity
+  data$Term <- relevel(data$Term, ref = "X")
+  data$Year <- relevel(data$Year, ref = "2003")
+  
+  # Create dummy variables
+  # term_dummies <- model.matrix(~ Term - 1, data = data)
+  # year_dummies <- model.matrix(~ Year - 1, data = data)
+  dept_dummies <- model.matrix(~ Dept - 1, data = data)
+
+  # Bind the dummy variables with the original data
+  data <- cbind(data, dept_dummies)
+
+  # Verify the column names of the dummy variables
+  # term_columns <- colnames(data)[grep("^Term", colnames(data))]
+  # year_columns <- colnames(data)[grep("^Year", colnames(data))]
+  dept_columns <- colnames(data)[grep("^Dept", colnames(data))]
+  dept_columns <- dept_columns[(dept_columns != "Dept_code") &
+                               (dept_columns != "Dept")]
+  dept_columns <- sapply(dept_columns, function(x) {
+  if (grepl("[^A-Za-z0-9_]", x)) {
+    paste0("`", x, "`")  # Add backticks around columns with special characters
+  } else {
+    x
+  }
+})
+
+  # Construct the formula with all dummy variables explicitly
+  formula <- as.formula(paste(outcome_variable, "~ st_required + prev_deg + Term + Year +",
+                              paste(c(dept_columns), collapse = " + ")))
+  
+  # Fit the model using the data with manually created dummy variables
+  model <- glm(formula, data = data, family = binomial(link = "logit"))
+  
+  # x <- model.matrix(formula, data = data)
+  # y <- data[[outcome_variable]]
+  # lasso_model <- glmnet(x, y, family = "binomial")
+  # set.seed(123)  
+  # cv_model <- cv.glmnet(x, y, family = "binomial")
+  # best_lambda <- cv_model$lambda.min
+  # lasso_model_best <- glmnet(x, y, family = "binomial", lambda = best_lambda)
+
+  # Extract coefficients and their standard errors
+  summary_model <- tidy(model)
+  
+  summary_model$term <- gsub("`", "", summary_model$term)
+  
+  # Calculate predicted probabilities
+  data$predicted_probs <- predict(model, type = "response")
+  
+  # Compute the marginal effects for binary factors
+  # Marginal effect = β * p * (1 - p)
+  marginal_effects <- summary_model %>%
+    mutate(
+      # For binary factors, the marginal effect is β * p * (1 - p)
+      Estimate = ifelse(term %in% names(coef(model)), 
+                         estimate * mean(data$predicted_probs) * (1 - mean(data$predicted_probs)), 
+                         NA),
+      SE = std.error,
+      z = statistic,
+      p = p.value
+    )
+  
+  # Rename columns as needed
+  marginal_summary <- marginal_effects %>%
+    dplyr::select(
+      Term = term,
+      Estimate,
+      SE,
+      z,
+      p
+    )
+  
+  sample_size <- nobs(model)
+  # Create a new row for sample size
+  new_row <- tibble(
+    Term = "Sample Size",
+    Estimate = sample_size
+  ) %>%
+    add_column(!!!setNames(rep(NA, ncol(marginal_summary) - 2), 
+                           colnames(marginal_summary)[-(1:2)]))
+  
+  # Bind the new row to the existing data frame
+  marginal_summary <- bind_rows(new_row, marginal_summary)
+  
+  # Extract marginal effects for 'st_required'
+  marginal <- format_sig_figs(filter(marginal_summary, Term == 'st_required')$Estimate)
+  p_value <- format_sig_figs(filter(marginal_summary, Term == 'st_required')$p)
+  marginal_entry <- paste0(marginal, ' (', p_value, ')')
+  
+  return(list(
+    marginal_summary = marginal_summary,
+    marginal_entry = marginal_entry
+  ))
+}
+
+```
+
+
+# Import data
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+
+mas_dat5 <- read.xlsx("mas_dat5.xlsx")
+mas_dat6 <- read.xlsx("mas_dat6.xlsx")
+
+clean_dept_column <- function(df) {
+  df$Dept <- gsub('xml:space=\\"preserve\\">', '', df$Dept)
+  df$Dept <- gsub('&amp; ', '', df$Dept)
+  df$Dept <- trimws(df$Dept)  # Remove leading/trailing whitespace
+  return(df)
+}
+
+mas_dat5 <- clean_dept_column(mas_dat5)
+mas_dat6 <- clean_dept_column(mas_dat6)
+
+```
+
+
+# Descriptive statistics
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+
+# Function to generate histograms and save them as PNG files with optional filtering by st_required
+generate_histogram <- function(data, column, title, xlabel, filename, filter_stem = NULL, st_required_filter = NULL) {
+  if (!is.null(st_required_filter)) {
+    data <- data %>% filter(st_required == st_required_filter)
+  }
+  
+  if (!is.null(filter_stem)) {
+    data <- data %>% filter(STEM == filter_stem)
+  }
+  
+  png(filename = filename)
+  hist(data[[column]], main = title, xlab = xlabel, ylab = "Frequency")
+  dev.off()
+}
+
+# Function to calculate summary statistics for a given list of variables with optional filtering
+calculate_summary <- function(data5, data6, filter_stem = NULL, st_required_filter = NULL) {
+  
+  if (!is.null(filter_stem)) {
+    data5 <- data5 %>% filter(STEM == filter_stem)
+    data6 <- data6 %>% filter(STEM == filter_stem)
+  }
+  
+  if (!is.null(st_required_filter)) {
+    data5 <- data5 %>% filter(st_required == st_required_filter)
+    data6 <- data6 %>% filter(st_required == st_required_filter)
+  }
+
+  # Base variables that should only appear once
+  variable_list <- list(
+    st_required = data6$st_required,
+    year_1_gpa = data5$year_1_gpa,
+    year_2_gpa = data5$year_2_gpa,
+    URM = data6$URM,
+    Non_Male = data6$Non_Male,
+    TIME_DEG = data6$TIME_DEG,
+    completed_8 = data6$completed_8,
+    completed_10 = data6$completed_10
+  )
+  
+  # Iterate over the years and add year-specific 'separated_i' values
+  for (year_i in 1:10) {
+    # Filter the data based on year and ADMIT_TERM conditions
+    data6_i <- data6 %>%
+      filter(case_when(
+        substr(ADMIT_TERM, 1, 1) %in% c("F", "X") ~ as.numeric(substr(ADMIT_TERM, nchar(ADMIT_TERM) - 3, nchar(ADMIT_TERM))) < 2023 - year_i,
+        substr(ADMIT_TERM, 1, 1) %in% c("W", "S") ~ as.numeric(substr(ADMIT_TERM, nchar(ADMIT_TERM) - 3, nchar(ADMIT_TERM))) < 2024 - year_i,
+        TRUE ~ FALSE
+      ))
+    
+    # Add the year-specific 'separated_i' variable to the result list
+    variable_list[[paste0("separated_", year_i)]] <- data6_i[[paste0("separated_", year_i)]]
+  }
+
+  
+  stats <- lapply(variable_list, function(variable) {
+    list(
+      `Sample Size` = sum(!is.na(variable)),  # Calculate and add the sample size
+      Mean = (mean(variable, na.rm = TRUE)),
+      Median = (median(variable, na.rm = TRUE)),
+      SD = (sd(variable, na.rm = TRUE)),
+      Min = min(variable, na.rm = TRUE),
+      Max = max(variable, na.rm = TRUE),
+      Quantiles = paste(quantile(variable, probs = c(0.25, 0.5, 0.75), na.rm = TRUE), collapse = ", ")
+    )
+  })
+
+  # Convert the list of statistics to a data frame
+  summary_model <- do.call(rbind, lapply(stats, as.data.frame))
+  summary_model$Variable <- c('ST Required', 'Year 1 GPA', 'Year 2 GPA', 'URM', 'Non-Male', 'Time to Degree', 'Completed within 8 years', 'Completed within 10 years', 'Year 1 Separation', 'Year 2 Separation', 'Year 3 Separation', 'Year 4 Separation', 'Year 5 Separation', 'Year 6 Separation', 'Year 7 Separation', 'Year 8 Separation', 'Year 9 Separation', 'Year 10 Separation')
+  # Reorder columns and reset rownames
+  summary_model <- summary_model[, c("Variable", setdiff(names(summary_model), "Variable"))]
+  rownames(summary_model) <- NULL
+  return(summary_model)
+}
+
+# Reusable function to generate histograms and summary statistics with stratification
+generate_analysis <- function(data5, data6, prefix, filter_stem = NULL) {
+  
+  # Histograms with stratification
+  generate_histogram(data5, "year_1_gpa", "Histogram of First-Year GPA", "First-Year GPA", 
+                     paste0(dirname(getwd()), "/Shiny/www/", prefix, "_gpa1_hist.png"), filter_stem)
+  generate_histogram(data5, "year_1_gpa", "Histogram of First-Year GPA (ST Required = 1)", "First-Year GPA", 
+                     paste0(dirname(getwd()), "/Shiny/www/", prefix, "_gpa1_hist_1.png"), filter_stem, st_required_filter = 1)
+  generate_histogram(data5, "year_1_gpa", "Histogram of First-Year GPA (ST Required = 0)", "First-Year GPA", 
+                     paste0(dirname(getwd()), "/Shiny/www/", prefix, "_gpa1_hist_0.png"), filter_stem, st_required_filter = 0)
+
+  generate_histogram(data5, "year_2_gpa", "Histogram of Second-Year GPA", "Second-Year GPA", 
+                     paste0(dirname(getwd()), "/Shiny/www/", prefix, "_gpa2_hist.png"), filter_stem)
+  generate_histogram(data5, "year_2_gpa", "Histogram of Second-Year GPA (ST Required = 1)", "Second-Year GPA", 
+                     paste0(dirname(getwd()), "/Shiny/www/", prefix, "_gpa2_hist_1.png"), filter_stem, st_required_filter = 1)
+  generate_histogram(data5, "year_2_gpa", "Histogram of Second-Year GPA (ST Required = 0)", "Second-Year GPA", 
+                     paste0(dirname(getwd()), "/Shiny/www/", prefix, "_gpa2_hist_0.png"), filter_stem, st_required_filter = 0)
+
+  generate_histogram(data6, "TIME_DEG", "Histogram of Time to Degree", "Time to Degree", 
+                     paste0(dirname(getwd()), "/Shiny/www/", prefix, "_time_hist.png"), filter_stem)
+  generate_histogram(data6, "TIME_DEG", "Histogram of Time to Degree (ST Required = 1)", "Time to Degree", 
+                     paste0(dirname(getwd()), "/Shiny/www/", prefix, "_time_hist_1.png"), filter_stem, st_required_filter = 1)
+  generate_histogram(data6, "TIME_DEG", "Histogram of Time to Degree (ST Required = 0)", "Time to Degree", 
+                     paste0(dirname(getwd()), "/Shiny/www/", prefix, "_time_hist_0.png"), filter_stem, st_required_filter = 0)
+
+  # Summary Stats with and without stratification
+  summary <- calculate_summary(data5, data6, filter_stem)
+  summary_1 <- calculate_summary(data5, data6, filter_stem, st_required_filter = 1)
+  summary_0 <- calculate_summary(data5, data6, filter_stem, st_required_filter = 0)
+  
+  list(summary = summary, summary_1 = summary_1, summary_0 = summary_0)
+}
+
+# Generate analysis for Master, STEM, and Non-STEM with stratification
+mas_analysis <- generate_analysis(mas_dat5, mas_dat6, "doc")
+mas_stem_analysis <- generate_analysis(mas_dat5, mas_dat6, "mas_stem", filter_stem = 1)
+mas_non_stem_analysis <- generate_analysis(mas_dat5, mas_dat6, "mas_non_stem", filter_stem = 0)
+
+```
+
+
+
+
+# GPA
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+
+# Year 1 GPA Analysis
+
+mas_gpa1 <- fit_lm_model(mas_dat5, "year_1_gpa")
+mas_gpa1_entry <- mas_gpa1$entry
+mas_gpa1_model_summary <- mas_gpa1$summary_model
+
+mas_stem_gpa1 <- fit_lm_model(mas_dat5, "year_1_gpa", filter_stem = 1)
+mas_stem_gpa1_entry <- mas_stem_gpa1$entry
+mas_stem_gpa1_model_summary <- mas_stem_gpa1$summary_model
+
+mas_non_stem_gpa1 <- fit_lm_model(mas_dat5, "year_1_gpa", filter_stem = 0)
+mas_non_stem_gpa1_entry <- mas_non_stem_gpa1$entry
+mas_non_stem_gpa1_model_summary <- mas_non_stem_gpa1$summary_model
+
+# Year 2 GPA Analysis
+
+mas_gpa2 <- fit_lm_model(mas_dat5, "year_2_gpa")
+mas_gpa2_entry <- mas_gpa2$entry
+mas_gpa2_model_summary <- mas_gpa2$summary_model
+
+mas_stem_gpa2 <- fit_lm_model(mas_dat5, "year_2_gpa", filter_stem = 1)
+mas_stem_gpa2_entry <- mas_stem_gpa2$entry
+mas_stem_gpa2_model_summary <- mas_stem_gpa2$summary_model
+
+mas_non_stem_gpa2 <- fit_lm_model(mas_dat5, "year_2_gpa", filter_stem = 0)
+mas_non_stem_gpa2_entry <- mas_non_stem_gpa2$entry
+mas_non_stem_gpa2_model_summary <- mas_non_stem_gpa2$summary_model
+
+```
+
+
+
+# URM
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+
+# Master Overall
+mas_URM <- fit_glm_model(mas_dat6, "URM")
+mas_URM_entry <- mas_URM$marginal_entry
+mas_URM_summary <- mas_URM$marginal_summary
+
+# Master STEM
+mas_stem_URM <- fit_glm_model(mas_dat6, "URM", filter_stem = 1)
+mas_stem_URM_entry <- mas_stem_URM$marginal_entry
+mas_stem_URM_summary <- mas_stem_URM$marginal_summary
+
+# Master Non-STEM
+mas_non_stem_URM <- fit_glm_model(mas_dat6, "URM", filter_stem = 0)
+mas_non_stem_URM_entry <- mas_non_stem_URM$marginal_entry
+mas_non_stem_URM_summary <- mas_non_stem_URM$marginal_summary
+
+```
+
+
+# Non-Male
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+
+# Year Non_Male Analysis
+
+# Master Overall
+mas_Non_Male <- fit_glm_model(mas_dat6, "Non_Male")
+mas_Non_Male_summary <- mas_Non_Male$marginal_summary
+mas_Non_Male_entry <- mas_Non_Male$marginal_entry
+
+# Master STEM
+mas_stem_Non_Male <- fit_glm_model(mas_dat6, "Non_Male", filter_stem = 1)
+mas_stem_Non_Male_summary <- mas_stem_Non_Male$marginal_summary
+mas_stem_Non_Male_entry <- mas_stem_Non_Male$marginal_entry
+
+# Master Non-STEM
+mas_non_stem_Non_Male <- fit_glm_model(mas_dat6, "Non_Male", filter_stem = 0)
+mas_non_stem_Non_Male_summary <- mas_non_stem_Non_Male$marginal_summary
+mas_non_stem_Non_Male_entry <- mas_non_stem_Non_Male$marginal_entry
+
+```
+
+
+# TIME_DEG
+
+## Linear regression
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+
+mas_time <- fit_lm_model(mas_dat6, "TIME_DEG")
+mas_time_entry <- mas_time$entry
+mas_time_model_summary <- mas_time$summary_model
+
+mas_time_stem <- fit_lm_model(mas_dat6, "TIME_DEG", filter_stem = 1)
+mas_stem_time_entry <- mas_time_stem$entry
+mas_stem_time_model_summary <- mas_time_stem$summary_model
+
+mas_time_non_stem <- fit_lm_model(mas_dat6, "TIME_DEG", filter_stem = 0)
+mas_non_stem_time_entry <- mas_time_non_stem$entry
+mas_non_stem_time_model_summary <- mas_time_non_stem$summary_model
+
+```
+
+
+## Survival
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+# 
+# # Master
+# 
+# mas_dat6 <- mas_dat6[!is.na(mas_dat6$event), ] %>%
+#   mutate(event = ifelse(event == 1 | event == 4, 0, event)) %>%
+#   mutate(event = ifelse(event == 2, 1, event)) %>%
+#   mutate(event = ifelse(event == 3, 2, event)) %>%
+#   mutate(TIME_DEG = ifelse(is.na(TIME_DEG), max(mas_dat6[!is.na(mas_dat6$TIME_DEG), ]$TIME_DEG), TIME_DEG))
+# 
+# mas_dat6$Dept <- as.numeric(as.factor(mas_dat6$Dept))
+# mas_dat6$ADMIT_TERM <- as.numeric(as.factor(mas_dat6$ADMIT_TERM))
+# 
+# mas_crr_fit <- crr(ftime = mas_dat6$TIME_DEG, 
+#     fstatus = mas_dat6$event, 
+#     cov1 = data.frame(st_required = mas_dat6$st_required,
+#                       Dept = mas_dat6$Dept,
+#                       ADMIT_TERM = mas_dat6$ADMIT_TERM))
+# 
+# mas_crr_fit_summary <- summary(mas_crr_fit)
+# mas_crr_fit_summary <- summary_to_df_surv(mas_crr_fit_summary)
+# mas_crr_fit_hr <- round_sig(mas_crr_fit_summary$coef[1,2])
+# mas_crr_fit_p <- round_sig(mas_crr_fit_summary$coef[1,5])
+# mas_crr_fit_entry <- paste0(mas_crr_fit_hr, ' (', mas_crr_fit_p, ')')
+# 
+# 
+# # Master STEM
+# 
+# mas_dat6_stem <- mas_dat6 %>%
+#   filter(STEM == 1)
+# 
+# mas_dat6_stem <- mas_dat6_stem[!is.na(mas_dat6_stem$event), ] %>%
+#   mutate(event = ifelse(event == 1 | event == 4, 0, event)) %>%
+#   mutate(event = ifelse(event == 2, 1, event)) %>%
+#   mutate(event = ifelse(event == 3, 2, event)) %>%
+#   mutate(TIME_DEG = ifelse(is.na(TIME_DEG), max(mas_dat6_stem[!is.na(mas_dat6_stem$TIME_DEG), ]$TIME_DEG), TIME_DEG))
+# 
+# mas_dat6_stem$Dept <- as.numeric(as.factor(mas_dat6_stem$Dept))
+# mas_dat6_stem$ADMIT_TERM <- as.numeric(as.factor(mas_dat6_stem$ADMIT_TERM))
+# 
+# mas_stem_crr_fit <- crr(ftime = mas_dat6_stem$TIME_DEG, 
+#     fstatus = mas_dat6_stem$event, 
+#     cov1 = data.frame(st_required = mas_dat6_stem$st_required,
+#                       Dept = mas_dat6_stem$Dept,
+#                       ADMIT_TERM = mas_dat6_stem$ADMIT_TERM))
+# 
+# mas_stem_crr_fit_summary <- summary(mas_stem_crr_fit)
+# mas_stem_crr_fit_summary <- summary_to_df_surv(mas_stem_crr_fit_summary)
+# mas_stem_crr_fit_hr <- round_sig(mas_stem_crr_fit_summary$coef[1,2])
+# mas_stem_crr_fit_p <- round_sig(mas_stem_crr_fit_summary$coef[1,5])
+# mas_stem_crr_fit_entry <- paste0(mas_stem_crr_fit_hr, ' (', mas_stem_crr_fit_p, ')')
+# 
+# 
+# # Master Non-STEM
+# 
+# mas_dat6_non_stem <- mas_dat6 %>%
+#   filter(STEM == 0)
+# 
+# mas_dat6_non_stem <- mas_dat6_non_stem[!is.na(mas_dat6_non_stem$event), ] %>%
+#   mutate(event = ifelse(event == 1 | event == 4, 0, event)) %>%
+#   mutate(event = ifelse(event == 2, 1, event)) %>%
+#   mutate(event = ifelse(event == 3, 2, event)) %>%
+#   mutate(TIME_DEG = ifelse(is.na(TIME_DEG), max(mas_dat6_non_stem[!is.na(mas_dat6_non_stem$TIME_DEG), ]$TIME_DEG), TIME_DEG))
+# 
+# mas_dat6_non_stem$Dept <- as.numeric(as.factor(mas_dat6_non_stem$Dept))
+# mas_dat6_non_stem$ADMIT_TERM <- as.numeric(as.factor(mas_dat6_non_stem$ADMIT_TERM))
+# 
+# mas_non_stem_crr_fit <- crr(ftime = mas_dat6_non_stem$TIME_DEG, 
+#     fstatus = mas_dat6_non_stem$event, 
+#     cov1 = data.frame(st_required = mas_dat6_non_stem$st_required,
+#                       Dept = mas_dat6_non_stem$Dept,
+#                       ADMIT_TERM = mas_dat6_non_stem$ADMIT_TERM))
+# 
+# mas_non_stem_crr_fit_summary <- summary(mas_non_stem_crr_fit)
+# mas_non_stem_crr_fit_summary <- summary_to_df_surv(mas_non_stem_crr_fit_summary)
+# mas_non_stem_crr_fit_hr <- round_sig(mas_non_stem_crr_fit_summary$coef[1,2])
+# mas_non_stem_crr_fit_p <- round_sig(mas_non_stem_crr_fit_summary$coef[1,5])
+# mas_non_stem_crr_fit_entry <- paste0(mas_non_stem_crr_fit_hr, ' (', mas_non_stem_crr_fit_p, ')')
+
+```
+
+
+# Completed within 8/10 years
+
+## 8
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+
+# Master Overall
+mas_completed_8 <- fit_glm_model(mas_dat6, "completed_8")
+mas_completed_8_entry <- mas_completed_8$marginal_entry
+mas_completed_8_summary <- mas_completed_8$marginal_summary
+
+# Master STEM
+mas_stem_completed_8 <- fit_glm_model(mas_dat6, "completed_8", filter_stem = 1)
+mas_stem_completed_8_entry <- mas_stem_completed_8$marginal_entry
+mas_stem_completed_8_summary <- mas_stem_completed_8$marginal_summary
+
+# Master Non-STEM
+mas_non_stem_completed_8 <- fit_glm_model(mas_dat6, "completed_8", filter_stem = 0)
+mas_non_stem_completed_8_entry <- mas_non_stem_completed_8$marginal_entry
+mas_non_stem_completed_8_summary <- mas_non_stem_completed_8$marginal_summary
+
+```
+
+## 10
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+
+# Master Overall
+mas_completed_10 <- fit_glm_model(mas_dat6, "completed_10")
+mas_completed_10_entry <- mas_completed_10$marginal_entry
+mas_completed_10_summary <- mas_completed_10$marginal_summary
+
+# Master STEM
+mas_stem_completed_10 <- fit_glm_model(mas_dat6, "completed_10", filter_stem = 1)
+mas_stem_completed_10_entry <- mas_stem_completed_10$marginal_entry
+mas_stem_completed_10_summary <- mas_stem_completed_10$marginal_summary
+
+# Master Non-STEM
+mas_non_stem_completed_10 <- fit_glm_model(mas_dat6, "completed_10", filter_stem = 0)
+mas_non_stem_completed_10_entry <- mas_non_stem_completed_10$marginal_entry
+mas_non_stem_completed_10_summary <- mas_non_stem_completed_10$marginal_summary
+
+```
+
+
+# Export
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+
+wb <- createWorkbook()
+
+# Add sheets to the workbook
+# addWorksheet(wb, "summary")
+addWorksheet(wb, "stats")
+addWorksheet(wb, "stats_s")
+addWorksheet(wb, "stats_n")
+addWorksheet(wb, "stats_1")
+addWorksheet(wb, "stats_s_1")
+addWorksheet(wb, "stats_n_1")
+addWorksheet(wb, "stats_0")
+addWorksheet(wb, "stats_s_0")
+addWorksheet(wb, "stats_n_0")
+addWorksheet(wb, "gpa1")
+addWorksheet(wb, "gpa1_s")
+addWorksheet(wb, "gpa1_n")
+addWorksheet(wb, "gpa2")
+addWorksheet(wb, "gpa2_s")
+addWorksheet(wb, "gpa2_n")
+addWorksheet(wb, "ttd")
+addWorksheet(wb, "ttd_s")
+addWorksheet(wb, "ttd_n")
+addWorksheet(wb, "urm")
+addWorksheet(wb, "urm_s")
+addWorksheet(wb, "urm_n")
+addWorksheet(wb, "gender")
+addWorksheet(wb, "gender_s")
+addWorksheet(wb, "gender_n")
+addWorksheet(wb, "completed_8")
+addWorksheet(wb, "completed_8_s")
+addWorksheet(wb, "completed_8_n")
+addWorksheet(wb, "completed_10")
+addWorksheet(wb, "completed_10_s")
+addWorksheet(wb, "completed_10_n")
+
+
+# Write data to the sheets
+# writeData(wb, sheet = "summary", x = mas_analysis_summary)
+writeData(wb, sheet = "stats", x = mas_analysis$summary)
+writeData(wb, sheet = "stats_s", x = mas_stem_analysis$summary)
+writeData(wb, sheet = "stats_n", x = mas_non_stem_analysis$summary)
+writeData(wb, sheet = "stats_1", x = mas_analysis$summary_1)
+writeData(wb, sheet = "stats_s_1", x = mas_stem_analysis$summary_1)
+writeData(wb, sheet = "stats_n_1", x = mas_non_stem_analysis$summary_1)
+writeData(wb, sheet = "stats_0", x = mas_analysis$summary_0)
+writeData(wb, sheet = "stats_s_0", x = mas_stem_analysis$summary_0)
+writeData(wb, sheet = "stats_n_0", x = mas_non_stem_analysis$summary_0)
+writeData(wb, sheet = "gpa1", x = mas_gpa1_model_summary)
+writeData(wb, sheet = "gpa1_s", x = mas_stem_gpa1_model_summary)
+writeData(wb, sheet = "gpa1_n", x = mas_non_stem_gpa1_model_summary)
+writeData(wb, sheet = "gpa2", x = mas_gpa2_model_summary)
+writeData(wb, sheet = "gpa2_s", x = mas_stem_gpa2_model_summary)
+writeData(wb, sheet = "gpa2_n", x = mas_non_stem_gpa2_model_summary)
+writeData(wb, sheet = "ttd", x = mas_time_model_summary)
+writeData(wb, sheet = "ttd_s", x = mas_stem_time_model_summary)
+writeData(wb, sheet = "ttd_n", x = mas_non_stem_time_model_summary)
+writeData(wb, sheet = "urm", x = mas_URM_summary)
+writeData(wb, sheet = "urm_s", x = mas_stem_URM_summary)
+writeData(wb, sheet = "urm_n", x = mas_non_stem_URM_summary)
+writeData(wb, sheet = "gender", x = mas_Non_Male_summary)
+writeData(wb, sheet = "gender_s", x = mas_stem_Non_Male_summary)
+writeData(wb, sheet = "gender_n", x = mas_non_stem_Non_Male_summary)
+writeData(wb, sheet = "completed_8", x = mas_completed_8_summary)
+writeData(wb, sheet = "completed_8_s", x = mas_stem_completed_8_summary)
+writeData(wb, sheet = "completed_8_n", x = mas_non_stem_completed_8_summary)
+writeData(wb, sheet = "completed_10", x = mas_completed_10_summary)
+writeData(wb, sheet = "completed_10_s", x = mas_stem_completed_10_summary)
+writeData(wb, sheet = "completed_10_n", x = mas_non_stem_completed_10_summary)
+
+```
+
+
+
+# Add separation data
+
+```{r}
+
+mas_sep_i_entries <- c()
+mas_stem_sep_i_entries <- c()
+mas_non_stem_sep_i_entries <- c()
+
+for (year_i in 1:10) {
+  
+  mas_dat6_i <- mas_dat6 %>%
+    filter(case_when(
+      substr(ADMIT_TERM, 1, 1) %in% c("F", "X") ~ as.numeric(substr(ADMIT_TERM, nchar(ADMIT_TERM) - 3, nchar(ADMIT_TERM))) < 2023 - year_i,
+      substr(ADMIT_TERM, 1, 1) %in% c("W", "S") ~ as.numeric(substr(ADMIT_TERM, nchar(ADMIT_TERM) - 3, nchar(ADMIT_TERM))) < 2024 - year_i,
+      TRUE ~ FALSE
+    ))
+  
+  # Master Overall
+  mas_sep_i <- fit_glm_model(mas_dat6_i, paste0("separated_", year_i))
+  mas_sep_i_entry <- mas_sep_i$marginal_entry
+  mas_sep_i_summary <- mas_sep_i$marginal_summary
+  
+  # Master STEM
+  mas_stem_sep_i <- fit_glm_model(mas_dat6_i, paste0("separated_", year_i), filter_stem = 1)
+  mas_stem_sep_i_entry <- mas_stem_sep_i$marginal_entry
+  mas_stem_sep_i_summary <- mas_stem_sep_i$marginal_summary
+  
+  # Master Non-STEM
+  mas_non_stem_sep_i <- fit_glm_model(mas_dat6_i, paste0("separated_", year_i), filter_stem = 0)
+  mas_non_stem_sep_i_entry <- mas_non_stem_sep_i$marginal_entry
+  mas_non_stem_sep_i_summary <- mas_non_stem_sep_i$marginal_summary
+  
+  # Save entries
+  mas_sep_i_entries <- c(mas_sep_i_entries, mas_sep_i_entry)
+  mas_stem_sep_i_entries <- c(mas_stem_sep_i_entries, mas_stem_sep_i_entry)
+  mas_non_stem_sep_i_entries <- c(mas_non_stem_sep_i_entries, mas_non_stem_sep_i_entry)
+  
+  # Write to sheets
+  addWorksheet(wb, paste0("sep", year_i))
+  addWorksheet(wb, paste0("sep", year_i, '_s'))
+  addWorksheet(wb, paste0("sep", year_i, '_n'))
+  writeData(wb, sheet = paste0("sep", year_i), x = mas_sep_i_summary)
+  writeData(wb, sheet = paste0("sep", year_i, '_s'), x = mas_stem_sep_i_summary)
+  writeData(wb, sheet = paste0("sep", year_i, '_n'), x = mas_non_stem_sep_i_summary)
+}
+
+```
+
+
+
+
+
+# Summary
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+
+mas_analysis_summary <- data.frame(
+  Variable = c('Year 1 GPA', 'Year 2 GPA', 'URM', 'Non-Male', 'Time to Degree', 'Completed within 8 years', 'Completed within 10 years', paste0('Year ', 1:10, ' Separation')),
+  All = c(mas_gpa1_entry, mas_gpa2_entry, mas_URM_entry, mas_Non_Male_entry, mas_time_entry, mas_completed_8_entry, mas_completed_10_entry, mas_sep_i_entries),
+  STEM = c(mas_stem_gpa1_entry, mas_stem_gpa2_entry, mas_stem_URM_entry, mas_stem_Non_Male_entry, mas_stem_time_entry, mas_stem_completed_8_entry, mas_stem_completed_10_entry, mas_stem_sep_i_entries),
+  Non_STEM = c(mas_non_stem_gpa1_entry, mas_non_stem_gpa2_entry, mas_non_stem_URM_entry, mas_non_stem_Non_Male_entry, mas_non_stem_time_entry, mas_non_stem_completed_8_entry, mas_non_stem_completed_10_entry, mas_non_stem_sep_i_entries)
+)
+
+addWorksheet(wb, "summary")
+writeData(wb, sheet = "summary", x = mas_analysis_summary)
+
+# Save the workbook with the updates
+saveWorkbook(wb, paste0(dirname(getwd()), "/Shiny/Mas_Complete Summaries.xlsx"), overwrite = TRUE)
+
+```
+
+
+
+
+
+
+
+
+
+
